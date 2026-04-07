@@ -1,0 +1,63 @@
+const express = require('express');
+const cors = require('cors');
+const nodemailer = require('nodemailer');
+require('dotenv').config();
+const { GoogleGenAI } = require('@google/genai');
+const app = express();
+app.use(cors());
+app.use(express.json());
+const path = require('path');
+app.use(express.static(path.join(__dirname, '..')));
+const ai = new GoogleGenAI(process.env.GEMINI_API_KEY);
+const fs = require('fs');
+const knowledgeBase = fs.readFileSync('knowledge.md', 'utf8');
+
+const SYSTEM_PROMPT = "Eres AWI, asistente experto en seguros para Darwin Quevedo. " +
+"Reglas: 1. Se conciso. 2. Usa emojis. 3. Pide datos: Nombre, Empresa, Curso, Modalidad, Periodo, Email. " +
+"4. Al final imprime [GUARDAR_CITA: {...}].\n\nKB:\n" + knowledgeBase;
+
+app.post('/api/chat', async (req, res) => {
+    try {
+            const { message, history = [] } = req.body;
+                    const contents = history.map(h => ({
+                                role: h.sender === 'user' ? 'user' : 'model',
+                                            parts: [{ text: h.text }]
+                                                    }));
+                                                            contents.push({ role: 'user', parts: [{ text: message }] });
+                                                                    const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+                                                                            const result = await model.generateContent({
+                                                                                      contents: contents,
+                                                                                                systemInstruction: SYSTEM_PROMPT,
+                                                                                                          generationConfig: { temperature: 0.3 }
+                                                                                                                  });
+                                                                                                                          let botReply = result.response.text();
+                                                                                                                                  const citaRegex = /\[GUARDAR_CITA:\s*(\{.*?\})\s*\]/;
+                                                                                                                                          const match = botReply.match(citaRegex);
+                                                                                                                                                  if (match && match[1]) {
+                                                                                                                                                              try {
+                                                                                                                                                                              const citaDatos = JSON.parse(match[1]);
+                                                                                                                                                                                              botReply = botReply.replace(citaRegex, '').trim();
+                                                                                                                                                                                                              const transporter = nodemailer.createTransport({
+                                                                                                                                                                                                                                  service: 'gmail',
+                                                                                                                                                                                                                                                      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD }
+                                                                                                                                                                                                                                                                      });
+                                                                                                                                                                                                                                                                                      transporter.sendMail({
+                                                                                                                                                                                                                                                                                                          from: '"AWI Asistente" <' + process.env.GMAIL_USER + '>',
+                                                                                                                                                                                                                                                                                                                              to: 'consultoriaedq@gmail.com',
+                                                                                                                                                                                                                                                                                                                                                  subject: 'NUEVA CITA - AWI',
+                                                                                                                                                                                                                                                                                                                                                                      text: JSON.stringify(citaDatos, null, 2)
+                                                                                                                                                                                                                                                                                                                                                                                      }).catch(console.error);
+                                                                                                                                                                                                                                                                                                                                                                                                  } catch (e) { console.error(e); }
+                                                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                                                                  res.json({ reply: botReply });
+                                                                                                                                                                                                                                                                                                                                                                                                                      } catch (error) {
+                                                                                                                                                                                                                                                                                                                                                                                                                              console.error(error);
+                                                                                                                                                                                                                                                                                                                                                                                                                                      res.status(500).json({ error: 'Error' });
+                                                                                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                                                                                          });
+                                                                                                                                                                                                                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                                                                                                                                                                                                          const PORT = process.env.PORT || 3000;
+                                                                                                                                                                                                                                                                                                                                                                                                                                          app.listen(PORT, () => {
+                                                                                                                                                                                                                                                                                                                                                                                                                                              console.log("Server running on port " + PORT);
+                                                                                                                                                                                                                                                                                                                                                                                                                                              });
+                                                                                                                                                                                                                                                                                                                                                                                                                                              
